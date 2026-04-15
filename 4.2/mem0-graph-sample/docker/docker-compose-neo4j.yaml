@@ -1,0 +1,220 @@
+# =============================================================================
+# 架构说明：
+#   Redis (缓存层 + 写入缓冲) --> Neo4j 因果集群 (3 Core 节点)
+#
+#   - Redis         : 查询结果缓存 / 写入削峰队列 / 分布式锁
+#   - neo4j-core1   : Neo4j 核心节点1 (集群发现引导)
+#   - neo4j-core2   : Neo4j 核心节点2
+#   - neo4j-core3   : Neo4j 核心节点3
+#
+# 端口说明（对外）：
+#   Redis          : 6379
+#   neo4j-core1    : 7474 (HTTP Browser), 7687 (Bolt)
+#   neo4j-core2    : 7475 (HTTP Browser), 7688 (Bolt)
+#   neo4j-core3    : 7476 (HTTP Browser), 7689 (Bolt)
+#
+# 节点内部端口（仅 neo4j-net 内可达）：
+#   5000  : 集群发现 (Discovery)
+#   6000  : 事务协调 (Transaction)
+#   7000  : Raft 共识协议
+#
+# 配置变更说明（Neo4j 4.x → 5.x）：
+#   NEO4J_dbms_mode=CORE                      → NEO4J_initial_server_mode__constraint=PRIMARY
+#   NEO4J_causal__clustering_*                → NEO4J_dbms_cluster_* / NEO4J_server_*
+#   NEO4J_dbms_connector_bolt_*               → NEO4J_server_bolt_*
+#   NEO4J_dbms_memory_heap_*                  → NEO4J_server_memory_heap_*
+# =============================================================================
+
+networks:
+  neo4j-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+volumes:
+  redis-data:
+  neo4j-core1-data:
+  neo4j-core1-logs:
+  neo4j-core2-data:
+  neo4j-core2-logs:
+  neo4j-core3-data:
+  neo4j-core3-logs:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Redis 缓存层 + 写入缓冲
+  # ---------------------------------------------------------------------------
+  redis:
+    image: docker.1ms.run/redis:7.2-alpine
+    container_name: mem0-neo4j-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-mem0redis2024}
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      neo4j-net:
+        ipv4_address: 172.21.0.10
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-mem0redis2024}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Neo4j Core 节点1 —— 集群引导节点
+  # ---------------------------------------------------------------------------
+  neo4j-core1:
+    image: docker.1ms.run/neo4j:5.19-enterprise
+    container_name: mem0-neo4j-core1
+    restart: unless-stopped
+    # 注意：neo4j 镜像不含 curl，改用内置的 wget 检查 HTTP 接口
+    environment:
+      # 鉴权
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-mem0neo4j2024}
+      # 企业版 License
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      # Neo4j 5.x 集群模式（替代旧版 NEO4J_dbms_mode=CORE）
+      - NEO4J_initial_server_mode__constraint=PRIMARY
+      # 集群发现：LIST 模式，列举所有成员
+      - NEO4J_dbms_cluster_discovery_resolver__type=LIST
+      - NEO4J_dbms_cluster_discovery_endpoints=neo4j-core1:5000,neo4j-core2:5000,neo4j-core3:5000
+      # 节点对外广播地址（替代旧版 causal_clustering.*_advertised_address）
+      - NEO4J_server_discovery_advertised__address=neo4j-core1:5000
+      - NEO4J_server_cluster_advertised__address=neo4j-core1:6000
+      - NEO4J_server_cluster_raft_advertised__address=neo4j-core1:7000
+      # 对外 Bolt / HTTP 广播地址（改为公网 IP，否则外部客户端拿到容器名无法路由）
+      - NEO4J_server_bolt_advertised__address=${NEO4J_PUBLIC_IP:-neo4j-core1}:7687
+      - NEO4J_server_http_advertised__address=${NEO4J_PUBLIC_IP:-neo4j-core1}:7474
+      # 内存配置（替代旧版 NEO4J_dbms_memory_*）
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512m
+    ports:
+      - "7474:7474"   # HTTP Browser
+      - "7687:7687"   # Bolt
+    volumes:
+      - neo4j-core1-data:/data
+      - neo4j-core1-logs:/logs
+    networks:
+      neo4j-net:
+        ipv4_address: 172.21.0.21
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 > /dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Neo4j Core 节点2
+  # ---------------------------------------------------------------------------
+  neo4j-core2:
+    image: docker.1ms.run/neo4j:5.19-enterprise
+    container_name: mem0-neo4j-core2
+    restart: unless-stopped
+    depends_on:
+      neo4j-core1:
+        condition: service_started   # 不等 healthy，三节点同时启动一起选举
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-mem0neo4j2024}
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - NEO4J_initial_server_mode__constraint=PRIMARY
+      - NEO4J_dbms_cluster_discovery_resolver__type=LIST
+      - NEO4J_dbms_cluster_discovery_endpoints=neo4j-core1:5000,neo4j-core2:5000,neo4j-core3:5000
+      - NEO4J_server_discovery_advertised__address=neo4j-core2:5000
+      - NEO4J_server_cluster_advertised__address=neo4j-core2:6000
+      - NEO4J_server_cluster_raft_advertised__address=neo4j-core2:7000
+      - NEO4J_server_bolt_advertised__address=${NEO4J_PUBLIC_IP:-neo4j-core2}:7688
+      - NEO4J_server_http_advertised__address=${NEO4J_PUBLIC_IP:-neo4j-core2}:7475
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512m
+    ports:
+      - "7475:7474"   # HTTP Browser
+      - "7688:7687"   # Bolt
+    volumes:
+      - neo4j-core2-data:/data
+      - neo4j-core2-logs:/logs
+    networks:
+      neo4j-net:
+        ipv4_address: 172.21.0.22
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 > /dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Neo4j Core 节点3
+  # ---------------------------------------------------------------------------
+  neo4j-core3:
+    image: docker.1ms.run/neo4j:5.19-enterprise
+    container_name: mem0-neo4j-core3
+    restart: unless-stopped
+    depends_on:
+      neo4j-core1:
+        condition: service_started   # 不等 healthy，三节点同时启动一起选举
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-mem0neo4j2024}
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - NEO4J_initial_server_mode__constraint=PRIMARY
+      - NEO4J_dbms_cluster_discovery_resolver__type=LIST
+      - NEO4J_dbms_cluster_discovery_endpoints=neo4j-core1:5000,neo4j-core2:5000,neo4j-core3:5000
+      - NEO4J_server_discovery_advertised__address=neo4j-core3:5000
+      - NEO4J_server_cluster_advertised__address=neo4j-core3:6000
+      - NEO4J_server_cluster_raft_advertised__address=neo4j-core3:7000
+      - NEO4J_server_bolt_advertised__address=${NEO4J_PUBLIC_IP:-neo4j-core3}:7689
+      - NEO4J_server_http_advertised__address=${NEO4J_PUBLIC_IP:-neo4j-core3}:7476
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=512m
+    ports:
+      - "7476:7474"   # HTTP Browser
+      - "7689:7687"   # Bolt
+    volumes:
+      - neo4j-core3-data:/data
+      - neo4j-core3-logs:/logs
+    networks:
+      neo4j-net:
+        ipv4_address: 172.21.0.23
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 > /dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

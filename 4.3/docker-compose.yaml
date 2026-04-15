@@ -1,0 +1,67 @@
+version: "3.7"
+
+services:
+  redis:
+    image: docker.1ms.run/redis/redis-stack:latest
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+      - "8001:8001"   # RedisInsight 管理界面
+    environment:
+      - REDIS_ARGS=--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+
+  qdrant_node_1:
+    image: docker.1ms.run/qdrant/qdrant:latest
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    command: ./qdrant --uri 'http://qdrant_node_1:6335'
+    healthcheck:
+      test: bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 3
+
+  qdrant_node_2:
+    image: docker.1ms.run/qdrant/qdrant:latest
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+    depends_on:
+      - qdrant_node_1
+      - redis
+    ports:
+      - "6433:6333"
+      - "6434:6334"
+    command: ./qdrant --bootstrap 'http://qdrant_node_1:6335' --uri 'http://qdrant_node_2:6335'
+
+  qdrant_node_3:
+    image: docker.1ms.run/qdrant/qdrant:latest
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__CLUSTER__ENABLED=true
+      - QDRANT__CLUSTER__P2P__PORT=6335
+    depends_on:
+      - qdrant_node_1
+      - redis
+    ports:
+      - "6533:6333"
+      - "6534:6334"
+    command: ./qdrant --bootstrap 'http://qdrant_node_1:6335' --uri 'http://qdrant_node_3:6335'
+
+volumes:
+  redis_data:
