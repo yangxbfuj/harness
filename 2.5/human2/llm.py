@@ -1,7 +1,7 @@
 from langchain_openai import ChatOpenAI
 import os
 from dotenv import load_dotenv
-
+from langchain_deepseek import ChatDeepSeek
 # 加载 .env 文件
 load_dotenv()
 
@@ -15,3 +15,6 @@ def Tongyi():
             "enable_thinking": False
         },
     )
+
+def myDeepSeek():
+    return ChatDeepSeek(model="deepseek-chat")

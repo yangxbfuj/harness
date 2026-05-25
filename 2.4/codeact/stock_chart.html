@@ -1,0 +1,106 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>股票价格走势图</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f5f5f5; }
+        .container { width: 800px; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .stats { display: flex; justify-content: space-around; margin: 20px 0; }
+        .stat-item { text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px; }
+        .stat-item h3 { margin: 0; color: #666; font-size: 14px; }
+        .stat-item p { margin: 5px 0 0; font-size: 24px; font-weight: bold; }
+        .conclusion { margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; }
+        .up { color: #e74c3c; }
+        .down { color: #27ae60; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>股票近7天收盘价走势图</h1>
+        <div class="stats">
+            <div class="stat-item">
+                <h3>起始价</h3>
+                <p>10.1</p>
+            </div>
+            <div class="stat-item">
+                <h3>最高价</h3>
+                <p class="up">11.4</p>
+            </div>
+            <div class="stat-item">
+                <h3>最低价</h3>
+                <p class="down">9.3</p>
+            </div>
+            <div class="stat-item">
+                <h3>当前价</h3>
+                <p>9.3</p>
+            </div>
+        </div>
+        <canvas id="priceChart" width="800" height="400"></canvas>
+        <div class="conclusion">
+            <h3>趋势分析结论：</h3>
+            <p>该股票在7天内呈现"下降→上涨→下降"的波动形态：</p>
+            <ul>
+                <li>第1-2天：股价从10.1元小幅下跌至9.8元</li>
+                <li>第2-4天：快速上涨至11.4元，达到7天最高点</li>
+                <li>第4-7天：持续下跌至9.3元，跌破起始价</li>
+            </ul>
+            <p>整体走势：<strong>下跌趋势</strong>（-7.92%）</p>
+            <p>建议：短期波动较大，近期处于下降通道，建议谨慎关注，等待企稳信号。</p>
+        </div>
+    </div>
+    <script>
+        const ctx = document.getElementById('priceChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['第1天', '第2天', '第3天', '第4天', '第5天', '第6天', '第7天'],
+                datasets: [{
+                    label: '收盘价 (元)',
+                    data: [10.1, 9.8, 10.7, 11.4, 10.9, 10.3, 9.3],
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                    borderWidth: 3,
+                    pointBackgroundColor: '#2980b9',
+                    pointRadius: 6,
+                    pointHoverRadius: 8,
+                    fill: true,
+                    tension: 0.2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return '收盘价: ' + context.parsed.y + ' 元';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 8.5,
+                        max: 12,
+                        ticks: {
+                            stepSize: 0.5,
+                            callback: function(value) {
+                                return value + ' 元';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,7 @@
 from langchain_core.tools import tool
 import random
+from langchain_deepseek import ChatDeepSeek
+
 
 @tool
 async def get_stock(product):
@@ -7,11 +9,13 @@ async def get_stock(product):
     stock = 10
     return f"商品{product}的库存为{stock}件"
 
+
 @tool
 async def get_price(product):
     """获取商品价格"""
     price = 2
     return f"商品{product}的价格为{price:.2f}元"
+
 
 @tool
 async def ask_user(ask_user_question):
@@ -19,5 +23,6 @@ async def ask_user(ask_user_question):
     print(ask_user_question)
     pass
 
-tools=[get_stock,get_price,ask_user]
-tool_with_names={tool.name: tool for tool in tools}
+
+tools = [get_stock, get_price, ask_user]
+tool_with_names = {tool.name: tool for tool in tools}

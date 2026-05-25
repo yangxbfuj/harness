@@ -1,4 +1,4 @@
-from langchain.agents import tool
+from langchain.tools import tool
 
 @tool
 def get_transport() -> str:

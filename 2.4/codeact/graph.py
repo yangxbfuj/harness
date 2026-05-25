@@ -1,14 +1,13 @@
-from langchain_core.messages import AIMessage, SystemMessage,HumanMessage, ToolMessage
-from langgraph.types import Send
-from langgraph.graph import StateGraph, MessagesState
+from langchain_core.messages import SystemMessage,HumanMessage
+from langgraph.graph import StateGraph
 from langgraph.graph import START, END
 from langgraph.graph.message import add_messages
-from llm import Tongyi
+from llm import myDeepSeek
 from prompts import SYSTEM_PROMPT
 from typing import Annotated, TypedDict
-from tools import tools
+from tools import current_path, tools
 
-llm_Tongyi = Tongyi()
+llm_Tongyi = myDeepSeek()
 
 class OverallState(TypedDict):
     messages: Annotated[list, add_messages]
@@ -60,6 +59,7 @@ class CodeActGraph():
             return state
 
         graph = StateGraph(OverallState)
+        
         graph.add_node("llm_call", llm_call)
         graph.add_node("enter_process", enter_process)
         graph.add_node("process_node", process_node)
@@ -75,9 +75,9 @@ class CodeActGraph():
 
 if __name__ == "__main__":
     graph = CodeActGraph()
-    prompt = """"
-    以下是某股票近7天的收盘价数据，请绘制折线图并保存到/root/python/ai-design-mode/codeact目录下，最后分析其趋势：
+    prompt = f""""
+    以下是某股票近7天的收盘价数据，请绘制折线图并保存到目录{current_path()}下, 文件格式为PNG，最后分析其趋势：
     [10.1, 9.8, 10.7, 11.4, 10.9, 10.3, 9.3]
-"""
+    """
     ret = graph.run(prompt)
     print(ret)
