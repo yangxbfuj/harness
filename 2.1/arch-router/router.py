@@ -1,6 +1,10 @@
-from langchain_ollama import OllamaLLM
+# from langchain_ollama import OllamaLLM
+from langchain_deepseek import ChatDeepSeek
 from typing import Dict, Any
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 TASK_INSTRUCTION = """
 You are a helpful assistant designed to find the best suited route.
@@ -43,19 +47,22 @@ route_config = [
     },
 ]
 
-def format_prompt(route_config: list[Dict[str, Any]], conversation: list[Dict[str, Any]]):
+
+def format_prompt(
+    route_config: list[Dict[str, Any]], conversation: list[Dict[str, Any]]
+):
     return (
         TASK_INSTRUCTION.format(
-            routes=json.dumps(route_config), 
-            conversation=json.dumps(conversation)
-        ) +
-        FORMAT_PROMPT
+            routes=json.dumps(route_config), conversation=json.dumps(conversation)
+        )
+        + FORMAT_PROMPT
     )
 
+
 def main():
-    llm = OllamaLLM(base_url="http://localhost:8889", 
-                    model="archrouter:latest")
-    
+    llm = ChatDeepSeek(model="deepseek-v4-flash")
+    # llm = OllamaLLM(base_url="http://localhost:8889", model="archrouter:latest")
+
     conversation = [
         {
             "role": "user",
@@ -69,8 +76,10 @@ def main():
             "content": format_prompt(route_config, conversation),
         }
     ]
+    print("Prompt:\n" + messages[0]["content"])
 
-    print(llm.invoke(messages))
+    print(llm.invoke(messages).content)
+
 
 if __name__ == "__main__":
     main()

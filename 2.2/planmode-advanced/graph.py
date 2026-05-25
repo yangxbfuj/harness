@@ -1,21 +1,27 @@
 import asyncio
+import operator
 import os
+from typing import Annotated, Dict, List, Tuple, TypedDict, Union
+
 import yaml
 from dotenv import load_dotenv
-from langchain_core.prompts import ChatPromptTemplate,SystemMessagePromptTemplate,HumanMessagePromptTemplate,MessagesPlaceholder
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
-from langgraph.graph import StateGraph, START, END,MessagesState
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    HumanMessagePromptTemplate,
+    MessagesPlaceholder,
+    SystemMessagePromptTemplate,
+)
+from langgraph.graph import END, START, MessagesState, StateGraph
+from llm import DeepSeek, Tongyi
 from prompts import SYSTEM_PROMPT
-from llm import DeepSeek,Tongyi
+from pydantic import BaseModel, Field
 from tools import add, multiply
 from typing_extensions import Literal
-from typing import List, Dict
-from pydantic import BaseModel, Field
-from typing import List, Annotated, Tuple, Union, TypedDict
-import operator
 
 # 加载 .env 文件
 load_dotenv()
+
 
 class PlanExecute(TypedDict):
     input: str
@@ -23,23 +29,27 @@ class PlanExecute(TypedDict):
     past_steps: Annotated[List[Tuple], operator.add]
     response: str
 
-class Plan(BaseModel):  #实体对象
+
+class Plan(BaseModel):  # 实体对象
     """计划"""
-    steps: List[str] = Field(
-        description="要遵循的不同步骤应按顺序排列"
-    )
-    
+
+    steps: List[str] = Field(description="要遵循的不同步骤应按顺序排列")
+
+
 class Response(BaseModel):
     """Response to user."""
+
     response: str
 
 
 class Action(BaseModel):
     """执行的动作"""
+
     actions: Union[Response, Plan] = Field(
         description="要执行的动作,如果直接进行输出则选择Response,"
-                    "如果需执行工具,请选择Plan"
+        "如果需执行工具,请选择Plan"
     )
+
 
 plan_prompt = ChatPromptTemplate.from_template(
     """ 
@@ -62,21 +72,23 @@ plan_prompt = ChatPromptTemplate.from_template(
 - 如果还有步骤需要执行，输出：{{"actions": {{"steps": ["步骤1", "步骤2", ...]}}}}
 
 注意：actions 字段是必需的，不要使用其他字段名。
-""")
+"""
+)
 from langgraph.prebuilt import create_react_agent
-class PlanAgent():
-    def __init__(self,prompt_sys,plan=[],tools=[]):
-        self.tools = tools
-        llm=DeepSeek()
-        llm2=Tongyi()
-        self.plan=plan
-        self.agent_executor = create_react_agent(llm, tools, prompt=prompt_sys )
-        self.plan_executor = plan_prompt | \
-                             llm2.with_structured_output(Action)
 
-    async def execute_step(self,state: PlanExecute):
+
+class PlanAgent:
+    def __init__(self, prompt_sys, plan=[], tools=[]):
+        self.tools = tools
+        llm = DeepSeek()
+        llm2 = Tongyi()
+        self.plan = plan
+        self.agent_executor = create_react_agent(llm, tools, prompt=prompt_sys)
+        self.plan_executor = plan_prompt | llm2.with_structured_output(Action)
+
+    async def execute_step(self, state: PlanExecute):
         plan = state["plan"]
-        past_steps= state["past_steps"]
+        past_steps = state["past_steps"]
         plan_str = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(plan))
         task = plan[0]
         task_formatted = f"""计划剩余以下几个步骤:
@@ -89,14 +101,14 @@ class PlanAgent():
             "past_steps": [(task, agent_response["messages"][-1].content)],
         }
 
-    async def plan_step(self,state: PlanExecute):
+    async def plan_step(self, state: PlanExecute):
         output = await self.plan_executor.ainvoke(state)
         if isinstance(output.actions, Response):
             return {"response": output.actions.response}
         else:
             return {"plan": output.actions.steps}
 
-    def should_end(self,state: PlanExecute):
+    def should_end(self, state: PlanExecute):
         if "response" in state and state["response"]:
             return END
         else:
@@ -110,13 +122,10 @@ class PlanAgent():
         workflow.add_edge(START, "execute")
         workflow.add_edge("execute", "planstep")
 
-        workflow.add_conditional_edges(
-            "planstep",
-             self.should_end
-        )
+        workflow.add_conditional_edges("planstep", self.should_end)
         app = workflow.compile()
         config = {"recursion_limit": 50}
-        inputs = {"plan":self.plan}
+        inputs = {"plan": self.plan}
         async for event in app.astream(inputs, config=config):
             for k, v in event.items():
                 if k != "__end__":
@@ -124,16 +133,16 @@ class PlanAgent():
 
 
 async def run_graph():
-    plan=[
-           "计算1加100的和",
-           "用第一步得到的和乘以100",
-           "用第二步得到的乘积除以2",
-           "输出最终答案"
-            ]
-    tools=[add, multiply]
-    agent=PlanAgent(SYSTEM_PROMPT,plan,tools)
+    plan = [
+        "计算1加100的和",
+        "用第一步得到的和乘以100",
+        "用第二步得到的乘积除以2",
+        "输出最终答案",
+    ]
+    tools = [add, multiply]
+    agent = PlanAgent(SYSTEM_PROMPT, plan, tools)
     await agent.run()
 
-if __name__ == '__main__':
 
+if __name__ == "__main__":
     asyncio.run(run_graph())

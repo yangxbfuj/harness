@@ -1,9 +1,11 @@
-from langchain.agents import tool
+from langchain.tools import tool
+
 
 @tool
 def get_transport() -> str:
     """潮汕交通推荐"""
     return "机场：揭阳潮汕国际机场   火车站：潮汕站，汕头站"
+
 
 @tool
 def get_schedule() -> str:
@@ -16,6 +18,7 @@ D4：前往阳美玉都，之后来到国家历史名城潮州，带您游览【
 D5：早餐后乘车前往参观广东最美古村落——【龙湖古寨】游览【阿婆祠】-【进士第+探花府】，后根据您的返程班次，安排专车送您至机场或车站，结束束愉快的五天潮汕之旅，返回您温馨的家（火车动车建议买17：00以后的，飞机建议买19:00以后的）
 """
 
+
 @tool
 def get_food() -> str:
     """潮汕美食推荐"""
@@ -26,9 +29,12 @@ def get_food() -> str:
 南澳岛：生腌、海鲜砂锅粥、糖葱薄饼、蒸汽火锅、海鲜捞面
 """
 
+
 @tool
 def get_specialty_product() -> str:
     """潮汕特产推荐"""
     return "牛肉丸、红桃粿、绿豆饼、腐乳饼、沙茶酱、卤鸽"
+
+
 tools = [get_transport, get_schedule, get_food, get_specialty_product]
 tools_by_name = {tool.name: tool for tool in tools}
