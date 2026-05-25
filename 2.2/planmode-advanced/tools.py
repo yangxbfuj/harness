@@ -1,4 +1,4 @@
-from langchain.agents import tool
+from langchain.tools import tool
 
 @tool
 def add(a: int, b:int) -> str:

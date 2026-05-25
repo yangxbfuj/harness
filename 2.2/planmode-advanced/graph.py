@@ -1,23 +1,17 @@
 import asyncio
 import operator
-import os
-from typing import Annotated, Dict, List, Tuple, TypedDict, Union
+from typing import Annotated, List, Tuple, TypedDict, Union
 
-import yaml
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.prompts import (
     ChatPromptTemplate,
-    HumanMessagePromptTemplate,
-    MessagesPlaceholder,
-    SystemMessagePromptTemplate,
 )
-from langgraph.graph import END, START, MessagesState, StateGraph
-from llm import DeepSeek, Tongyi
+from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import create_react_agent
+from llm import DeepSeek, Tongyi, myDeepSeek
 from prompts import SYSTEM_PROMPT
 from pydantic import BaseModel, Field
 from tools import add, multiply
-from typing_extensions import Literal
 
 # 加载 .env 文件
 load_dotenv()
@@ -74,26 +68,41 @@ plan_prompt = ChatPromptTemplate.from_template(
 注意：actions 字段是必需的，不要使用其他字段名。
 """
 )
-from langgraph.prebuilt import create_react_agent
+
 
 
 class PlanAgent:
+    """计划智能体
+    1. 循环 计划 - 执行, 完成任务
+    2. START -> execute -> plan
+    
+    问题:
+    1. 能不能 START -> plan
+    
+    知识点:
+    1. with_structured_output, 固定了模型输出的格式
+    2. ChatPromptTemplate.from_template 输出的内容为?
+    """
     def __init__(self, prompt_sys, plan=[], tools=[]):
         self.tools = tools
-        llm = DeepSeek()
-        llm2 = Tongyi()
+        llm = myDeepSeek()
+        llm2 = myDeepSeek()
         self.plan = plan
         self.agent_executor = create_react_agent(llm, tools, prompt=prompt_sys)
+        
         self.plan_executor = plan_prompt | llm2.with_structured_output(Action)
 
     async def execute_step(self, state: PlanExecute):
+        print('-' * 50 + 'execute_step' + '-' * 50)
         plan = state["plan"]
+        print(f"Plan: {plan}")
         past_steps = state["past_steps"]
+        print(f"Past: {past_steps}")
         plan_str = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(plan))
         task = plan[0]
         task_formatted = f"""计划剩余以下几个步骤:
 {plan_str}\n\n你需要执行 步骤{1}. {task}.\n\n上一个已执行的步骤的结果是：{past_steps}"""
-        print(task_formatted)
+        # print(task_formatted)
         agent_response = await self.agent_executor.ainvoke(
             {"messages": [("user", task_formatted)]}
         )
@@ -102,7 +111,11 @@ class PlanAgent:
         }
 
     async def plan_step(self, state: PlanExecute):
+        print('-' * 50 + 'plan_step' + '-' * 50)
+        print(state)
+        # 异步执行
         output = await self.plan_executor.ainvoke(state)
+        # 判断指定结果
         if isinstance(output.actions, Response):
             return {"response": output.actions.response}
         else:
