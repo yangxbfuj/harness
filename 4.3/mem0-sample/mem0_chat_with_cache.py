@@ -27,11 +27,11 @@ import redis
 load_dotenv()
 
 # ── 配置 ──────────────────────────────────────────────────────────────────────
-TONGYI_API_KEY  = os.getenv("TONGYI_API_KEY", "")
+TONGYI_API_KEY = os.getenv("TONGYI_API_KEY", "")
 TONGYI_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 # Redis 连接配置
-REDIS_HOST = os.environ.get("REDIS_HOST", "121.41.120.130")
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 CACHE_TTL = int(os.environ.get("CACHE_TTL", 3600))  # 默认缓存 1 小时
 
@@ -40,16 +40,14 @@ CHAT_MODEL = "qwen3-max"
 
 # ── Redis 客户端 ──────────────────────────────────────────────────────────────
 
+
 def get_redis_client():
     """获取 Redis 客户端实例"""
-    return redis.Redis(
-        host=REDIS_HOST,
-        port=REDIS_PORT,
-        db=0,
-        decode_responses=True
-    )
+    return redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
+
 
 # ── 初始化 mem0 Memory ──────────────────────────────────────────────────────
+
 
 def init_memory():
     """初始化 mem0 Memory 实例，配置 Qdrant 向量存储和通义千问 LLM"""
@@ -60,7 +58,7 @@ def init_memory():
                 "model": "qwen3-max",
                 "api_key": TONGYI_API_KEY,
                 "openai_base_url": TONGYI_BASE_URL,
-            }
+            },
         },
         "embedder": {
             "provider": "openai",
@@ -69,29 +67,26 @@ def init_memory():
                 "api_key": TONGYI_API_KEY,
                 "openai_base_url": TONGYI_BASE_URL,
                 "embedding_dims": 1024,
-            }
+            },
         },
         "vector_store": {
             "provider": "qdrant",
             "config": {
                 "collection_name": "test",
-                "host": "121.41.120.130",
+                "host": "localhost",
                 "port": 6333,
-                "embedding_model_dims": 1024
-            }
-        }
+                "embedding_model_dims": 1024,
+            },
+        },
     }
     return Memory.from_config(config)
 
 
 # ── 带缓存的记忆检索 ──────────────────────────────────────────────────────────
 
+
 def search_with_cache(
-    memory: Memory,
-    redis_client: redis.Redis,
-    query: str,
-    user_id: str,
-    limit: int = 6
+    memory: Memory, redis_client: redis.Redis, query: str, user_id: str, limit: int = 6
 ) -> list:
     """
     带缓存的记忆搜索（Cache-Aside 模式）
@@ -107,7 +102,8 @@ def search_with_cache(
     # 尝试从缓存读取
     cached = redis_client.get(cache_key)
     if cached:
-        print("[Cache HIT] 直接从 Redis 返回结果")
+        # TODO 为什么打个日志就好了呢
+        print(f"[Cache HIT] 直接从 Redis 返回结果 {cached}")
         try:
             return json.loads(cached)
         except json.JSONDecodeError:
@@ -116,11 +112,15 @@ def search_with_cache(
             redis_client.delete(cache_key)
 
     # 缓存未命中，查询 Qdrant
-    print(f"[Cache MISS] 查询 Qdrant (query: {query})...")
-    search_response = memory.search(query=query, user_id=user_id, limit=limit)
-
+    # print(f"[Cache MISS] 查询 Qdrant (query: {query})...")
+    search_response = memory.search(query=query, filters={"user_id": user_id}, top_k=5)
+    # print(f"[Response] 查询 Qdrant 结果 ({search_response})")
     # mem0.search() 返回字典格式 {'results': [...], ...}
-    results = search_response.get('results', []) if isinstance(search_response, dict) else search_response
+    results = (
+        search_response.get("results", [])
+        if isinstance(search_response, dict)
+        else search_response
+    )
 
     # 回写缓存，设置 TTL
     redis_client.setex(cache_key, CACHE_TTL, json.dumps(results, ensure_ascii=False))
@@ -130,6 +130,7 @@ def search_with_cache(
 
 
 # ── 缓存失效 ────────────────────────────────────────────────────────────────
+
 
 def invalidate_user_cache(redis_client: redis.Redis, user_id: str) -> int:
     """
@@ -149,6 +150,7 @@ def invalidate_user_cache(redis_client: redis.Redis, user_id: str) -> int:
 
 
 # ── 上下文格式化 ──────────────────────────────────────────────────────────────
+
 
 def format_memory_context(search_results: list) -> str:
     """将 mem0 搜索结果格式化为 System Prompt 注入文本"""
@@ -173,6 +175,7 @@ def format_memory_context(search_results: list) -> str:
 
 # ── 对话核心 ──────────────────────────────────────────────────────────────────
 
+
 def chat_with_cached_memory(
     llm: OpenAI,
     memory: Memory,
@@ -196,7 +199,7 @@ def chat_with_cached_memory(
         redis_client=redis_client,
         query=user_message,
         user_id=user_id,
-        limit=6
+        limit=6,
     )
     context = format_memory_context(search_results)
     print(f"   记忆上下文：\n{context}\n")
@@ -224,7 +227,9 @@ def chat_with_cached_memory(
     assistant_reply = response.choices[0].message.content
 
     # ── Step 4: 更新短期上下文 ───────────────────────────────────────────────
+    print(f"🤖 更新短期上下文: role=user, content={user_message}")
     conversation_history.append({"role": "user", "content": user_message})
+    print(f"🤖 更新短期上下文: role=assistant, content={assistant_reply}")
     conversation_history.append({"role": "assistant", "content": assistant_reply})
 
     print()
@@ -233,11 +238,9 @@ def chat_with_cached_memory(
 
 # ── 退出时批量保存记忆 ────────────────────────────────────────────────────────
 
+
 def save_memory(
-    memory: Memory,
-    redis_client: redis.Redis,
-    conversation_history: list,
-    user_id: str
+    memory: Memory, redis_client: redis.Redis, conversation_history: list, user_id: str
 ) -> None:
     """
     退出时将完整多轮对话一次性保存到 mem0，并失效相关缓存
@@ -262,12 +265,14 @@ def save_memory(
 
     except Exception as e:
         import traceback
+
         print(f"   ⚠️  保存失败: {e}")
         if os.getenv("DEBUG", "").lower() == "true":
             print(f"   详细错误: {traceback.format_exc()}")
 
 
 # ── 主程序 ────────────────────────────────────────────────────────────────────
+
 
 def main():
     print("⚙️  正在初始化 mem0 Memory 和 Redis 连接...")
@@ -312,7 +317,7 @@ def main():
                         redis_client=redis_client,
                         query=test_query,
                         user_id=user_id,
-                        limit=6
+                        limit=6,
                     )
                     print("📋 检索结果:")
                     for i, mem in enumerate(results, 1):
@@ -329,7 +334,7 @@ def main():
 
             # 限制短期上下文长度
             if len(conversation_history) > MAX_SHORT_TERM * 2:
-                conversation_history = conversation_history[-(MAX_SHORT_TERM * 2):]
+                conversation_history = conversation_history[-(MAX_SHORT_TERM * 2) :]
 
             reply = chat_with_cached_memory(
                 llm=llm,
@@ -342,6 +347,7 @@ def main():
             print(f"🤖 助手: {reply}\n")
 
     finally:
+        print(f"\n💾 {conversation_history}")
         save_memory(memory, redis_client, conversation_history, user_id)
         print("👋 再见！")
 

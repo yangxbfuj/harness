@@ -1,5 +1,3 @@
-version: "3.7"
-
 services:
   redis:
     image: docker.1ms.run/redis/redis-stack:latest
